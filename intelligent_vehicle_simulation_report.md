@@ -179,7 +179,7 @@ void usart1_sendStr(char str[])
 	
 }
 
-<code>
+
 void check()//輸入的指令是否為"check_distance",是的話去求與物體的距離
 {
 	unsigned int i=0;
@@ -207,12 +207,12 @@ int main(void)
 //Rx1(pin10)=input with pull-up, Tx1(pin9)=alt.func output
 	USART1->CRI=0x200C;
 	USART1->BRR=7500;
-    while(1)
-	{
-		uint8_t c = usart3_recByte(); //接收輸入的指令
-		check(); //對輸出的指令作相對應的動作
-		delay_ms(1000);//delay 1000ms=1sec
-	}
+    while(1)   
+    {
+&nbsp;&nbsp;uint8_t c = usart3_recByte(); //接收輸入的指令
+&nbsp;&nbsp;check(); //對輸出的指令作相對應的動作
+&nbsp;&nbsp;delay_ms(1000);//delay 1000ms=1sec
+    }
 					
     return 0;
 }
@@ -228,3 +228,166 @@ int main(void)
 5.	回到原先中斷前的執行。  
 以上步驟可參考圖(四)[4]。  
 ![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic4.png)圖(四) Interrupt處理流程  
+[Interrupt種類][5]：  
+* SysTick interrupt：  
+會定期生成中斷請求。允許操作系統(OS)執行上下文切換(context switch)以同時執行多個任務。對於不需要操作系統的應用程序，SysTick可用於計時或作為需要定期執行的任務的中斷源。
+範例[6]:
+<p><pre><code>
+/*程式每隔1sec會去執行SysTick_Handler內的工作(toggle PC13), while迴圈可以是空的*/
+#include “stm32f10x.h”
+void SysTick_Handler()
+{   
+&nbsp;&nbsp;GPIOC->ODR^=(1<<13);/*toggle PC13*/
+}
+int main()
+{
+&nbsp;&nbsp;RCC->APB2ENR= 0xFC; /* Enable clocks for GPIO ports */
+&nbsp;&nbsp;GPIOC->CRH = 0x44344444; /* PC13 as output */
+	
+&nbsp;&nbsp;SysTick->LOAD=9000000-1; /*STRELOAD=72000000/8-1*/
+&nbsp;&nbsp;SysTick->CTRL=0x03; /*Clock=AHB clock/8,TickInt enable, Enable=1*/
+&nbsp;&nbsp;while(1){}
+}
+</code></pre></p>
+* I/O Port Interrupt：  
+因Input/output port所觸發的interrupt。  
+範例[7]：  
+<p><pre><code>
+/*功能:每當PB4因外部因素而從pull-up變pull-down,此時會發生interrupt, PC13會發生切換(1->0 or 0->1)*/
+#include “stm32f10x.h”
+void delay_ms(uint16_t t);
+void EXTI4_IRQHandler() /* interrupt handler for EXTI4 */
+{	
+	EXTI->PR = (1<<4); 
+/* Pending flag在Interrupt時被set, 故要clear */
+	GPIOC->ODR ^= 1<<13; 
+/* toggle PC13 */
+} 
+int main()
+{
+	RCC->APB2ENR |= (0xFC | 1); /* Enable clocks for GPIO ports and AFIO */
+	GPIOB->CRL = 0x44484444; /* PB4 as input */
+	GPIOB->ODR = (1<<4); /* pull-up PB4 */
+	GPIOC->CRH = 0x44344444; /* PC13 as output */
+	AFIO->EXTICR[1] = 1<<0; /* EXTI4 = 1 (selects PB4) */
+	EXTI->FTSR = (1<<4); /*當PB4從pull-up被pull-down時Interrupt被觸發 */
+	EXTI->IMR = (1<<4); /* enable interrupt EXTI4 */
+	NVIC_EnableIRQ(EXTI4_IRQn); /* enable the EXTI4 interrupt*/
+}
+</code></pre></p>
+*   USART Interrupt：  
+因Sending/Receiving data所觸發的interrupt。  
+範例[8]：  
+<p><pre><code>
+/*程式透過USART1取得character,並作出相對應的對策*/
+#include “stm32f10x.h”
+void USART1_IRQHandler()
+{
+	uint8_t c=USART1->DR; //get received data
+	if((c==’H’)||(c==’h’))
+		GPIOC->ODR|=(1<<13); //make PC13 high
+	else if((c==’L’)||(c==’l’))
+		GPIOC->ODR&=~(1<<13); //make PC13 low
+}
+int main()
+{
+	RCC->APB2ENR |= 0xFC | (1<<14); 
+/* Enable clocks for GPIO ports and USART1 clock */
+	GPIOC->CRH = 0x44344444; /* PC13 as output */
+	/*USART_intit*/
+	GPIOA->ODR|=(1<<10); //pull up PA10
+	GPIOA->CRH=0x444448B4; //RX1=Input TX1=output
+	USART1->CR1=0x2024; //receive int. enable, receive enable
+	USART1->BRR=7500; //72MHz/9600bps=7500
+	NVIC_EnableIRQ(USART1_IRQn); /* enable USART1_IRQ*/
+	while(1){}
+}		
+</code></pre></p>
+[Interrupt整合各個功能模組]：  
+
+* 超音波測距離：  
+使用SysTick Interrupt，設定固定時間週期，每當時間到時會跳到SysTick_Handler function，此時如果將function內寫了測輛距離的指令則車子每隔固定時間會去量一次自己與周圍物體的距離。
+除此之外，用超音波測距離可以使用I/O Port Interrupt，車子先發出一波(trigger pin=1，echo pin=0)，當此波因為碰撞到物體而反射回來時trigger pin=1，echo pin=1，此時觸發I/O Port interrupt，程式跳去EXTIn_IRQHandler() functin計算間格時間並推出車子與物體的距離。  
+
+* 控制智能車行駛方向和加減速：
+用鍵盤控制智能車。使用UART interrupt，當收到鍵盤q (結束程式，車子停止)、w (前進)、x (後退)、d (向右轉)、a (向左轉)、s(減速)和z(加速)的指令後，會跳到USART1_IRQHandler function去執行function相對應的指令。  
+
+範例：(設定GPIO連接超音波模組，並用interrupt整合)
+<p><pre><code>
+#include<stdio.h>
+#include ”stm32f10x.h”
+#include<time.h>
+#define True 1
+#define False 0
+typedef int bool;
+void send_trigger_pulse(void);
+void wait_for_echo(bool, int);
+double get_distance(void);
+void delay_ms(uint16_t t);
+void SysTick_Handler()
+{
+	printf("cm=%f" , get_distance());
+}
+void delay_ms(uint16_t t)
+{
+	volatile unsigned long l = 0;
+	for(uint16_t i = 0; i < t; i++)
+		for(l = 0; l < 6000; l++){}
+}
+void send_trigger_pulse()
+{
+    GPIOA->ODR |= (1<<9); //set PA9 high
+    delay_ms(0.01);//delay 0.01ms
+    GPIOA->ODR &= (0<<9); //set PA low
+}
+void wait_for_echo(bool value, int timeout)
+{
+    int count = timeout;
+    while(GPIOA->ODR |= (1<<10)!= value && count > 0)
+        count = count - 1;
+}
+
+double get_distance()
+{
+    send_trigger_pulse();
+    wait_for_echo(True, 5000);//等待回復時間不超過5sec
+    clock_t start,end;
+    start=clock();
+    wait_for_echo(False, 5000);
+    end=clock();
+    double diff= start-end;
+    double distance_cm=diff*340*100/2; //來回,故/2
+    return distance_cm;
+}
+
+int main(void) 
+{
+RCC->APB2ENR |= (0xFC | 1); /* Enable clocks for GPIO ports and AFIO */	
+	/******** 設定 PA9 為 output 覆用 (trigger)********/
+	/******** 設定 PA10 為 input 覆用 (echo)********/
+	GPIOA->CRH = 0x44444834; /* PA9 as output and PA10 as input*/
+	SysTick->LOAD=9000000-1; /*STRELOAD=72000000/8-1*/
+	SysTick->CTRL=0x03; /*Clock=AHB clock/8,TickInt enable, Enable=1*/
+/*程式每隔1sec會去執行SysTick_Handler內的工作,故while迴圈可以是空的*/
+while(1){}					
+    return 0;
+}
+</code></pre></p>
+# 加分內容：
+## I.	以PWM控制步進馬達：
+馬達使用的型號是：L298N(GPIO and PWM)，圖(五)[9]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic5.jpg)圖(五) L298N機電馬達驅動模組  
+[L298N規格][10]：  
+* 主控晶片：L298N  
+* 電壓：5V  
+* 驅動電壓：5V～35V  
+* 電流：0mA～36mA  
+* 驅動電流：2A    
+* 工作溫度：-20℃～135℃
+* 最大功率：25W  
+[L298N特點][10]：  
+工作電壓高(最高可達46V)；輸出電流大(瞬間峰值可達3A)；持續工作電流為2A；額定功率25W。內含兩個H橋的高電壓大電流全橋式驅動器可同時驅動兩個馬達，如圖(六)[10]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic6.png)圖(六) L298N可同時驅動兩個馬達  
+[控制馬達方向][11]：  
+腳位設定如下表，當ENA為0時，不提供電源，馬達漸漸停止。如果ENA為1時，則看IN1、IN2的值來決定，IN1、IN2同時為0，則馬達漸漸停止，同ENA(EnableA)為0的結果；IN1=0、IN2=1，馬達反轉；IN1=1、IN2=0，馬達正轉。IN1=1、IN2=1，馬達剎車，會立即停止，也就是說，它會提供一個扭力來鎖住馬達。ENB(另一個馬達)想法同ENA。  
+
