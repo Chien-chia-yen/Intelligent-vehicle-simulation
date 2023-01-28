@@ -390,4 +390,351 @@ while(1){}
 ![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic6.png)圖(六) L298N可同時驅動兩個馬達  
 [控制馬達方向][11]：  
 腳位設定如下表，當ENA為0時，不提供電源，馬達漸漸停止。如果ENA為1時，則看IN1、IN2的值來決定，IN1、IN2同時為0，則馬達漸漸停止，同ENA(EnableA)為0的結果；IN1=0、IN2=1，馬達反轉；IN1=1、IN2=0，馬達正轉。IN1=1、IN2=1，馬達剎車，會立即停止，也就是說，它會提供一個扭力來鎖住馬達。ENB(另一個馬達)想法同ENA。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/table1.PNG)  
+[控制馬達速度][12]：  
+所謂PWM，就是脈衝寬度調製技術，其具有兩個很重要的參數：頻率和佔空比。頻率，就是周期的倒數，1/(T1+T2)；佔空比，就是高電平在一個周期內所佔的比例，T1/(T1+T2)。又因為這是數位的輸出，其輸出值不是邏輯上的0就是邏輯上的1，所以又可視為週期性的方波，如下圖(七)[11]所示。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic7.png)圖(七)PWM介紹    
+## II.	以SPI連接陀螺儀模組
+使用的陀螺儀模組型號：MPU6000(SPI)，圖(八)[12][13]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic8.png)圖(八) MPU6000  
+[MPU6000規格][14]：  
+* 供電電源：2.375～3.46V（內部低壓差穩壓）  
+* 通信方式：標準IIC or SPI通信協定  
+* 晶片內置16bit AD轉換器 / 16位元資料輸出  
+* 陀螺儀範圍：±250 / 500 / 1000 / 2000°/s  
+* 加速度範圍：±2 / ±4 / ±8 / ±16g  
+* 引腳間距2.54mm  
+[MPU6000 Pin腳][15]：  
+* CLKIN (pin1) – 可選的外部時鐘输入，如果不用則連到GND。  
+* AUX_DA (pin6) – I2C 主串行数据，用於外接傳感器。  
+* AUX_CL  (pin7)– I2C 主串行時鐘，用於外接传感器。  
+* /CS – SPI (pin8) 片選（0=SPI mode）。  
+* AD0/SDO (pin9) – I2C Slave 地址 LSB（AD0）；SPI 串行數據输出（SDO）。  
+* REGOUT  (pin10)– 校准濾波電容連線。  
+* FSYNC (pin11) – 偵同步数字输入。  
+* INT (pin12) – 中斷數字輸出（推挽或開漏）。  
+* VDD (pin13)– 電源電壓及數字 I/O 供電電壓。  
+* GND (pin18)– 電源地。  
+* RESV (pin19,21,22) – 預留，不接。  
+* CPOUT (pin20)– 電赫泵電容連線。  
+* SCL/SCLK (pin23)–I2C 串行時鐘（SCL）；SPI 串行時鐘（SCLK）。  
+* SDA/SDI (pin24)–I2C 串行數據（SDA）；SPI 串行數據输入（SDI）。  
+* NC (pin 2, 3, 4, 5, 14,15, 16, 17) – 不接。
+
+[SPI原理][16]：    
+SPI與I2C相同是可以接多個裝置的，而且傳輸速度比I2C更快，而且與UART/RS-232一樣，發送與接收可同時進行。    
+不過SPI也有缺點，隨著連接裝置數的增加，線路也是要增加的，每增加一個連接裝置，至少要增加一條(如圖(九))，不像I2C可以一直維持只要兩條。而SPI在一對一連接時需要四條，一對二時要五條，一對三時要六條，即N+3的概念。另外SPI比I2C更少纜線化運用，多半是更短距離的連接。在實務上，I2C較常用來連接感測器，而SPI較常用來連接EEPROM記憶體、Flash記憶體（記憶卡），或一些液晶顯示器。 ![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic9.png) 圖(九)SPI每多連接一個裝置，必須增加一條新的SS線路  
+[材料]：  
+Raspberry Pi 2 Model B x 1、MPU-6000模組 x 1、連接線 x 4條。    
+[接線] (參考[17])：  
+將Raspberry Pi的第1 pin接到MPU-6000的VDD(pin13)；第3 pin接到MPU-6000的SDI(pin24)；第5 pin接到MPU-6000的SCLK(pin23)；第6 pin接到MPU-6000的GND(pin18)，如圖(十)[13]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic10.png)圖(十) Raspberry Pi與MPU-6000連接  
+撰寫程式碼如下(參考[18])：  
+1.include函式庫：#include <MPU6000.h>、#include<stdio.h>  
+2.初始化SPI。  
+<p><pre><code>
+bool mpu6000_spi::init(int sample_rate_div,int low_pass_filter)
+{
+   	unsigned int response;
+    	spi.format(8,0);
+/*第一個參數:該值必須為 8，因為當前 SPI 數據值僅支持資料值得位數為8位。第二個參數: 0: the data line is active when SCK goes to high and the data values are read */
+    	spi.frequency(1000000); // set the frequency for the SPI
+    	//FIRST OF ALL DISABLE I2C
+    	select(); //enable MPU6000的communication bus
+    	response=spi.write(MPUREG_USER_CTRL);
+		// Disable I2C bus (recommended on datasheet)
+    	response=spi.write(BIT_I2C_IF_DIS);
+    	deselect();//disable MPU6000的communication bus
+    	//RESET CHIP
+    	select();
+    	response=spi.write(MPUREG_PWR_MGMT_1);
+    	response=spi.write(BIT_H_RESET); 
+    	deselect();
+    	wait(0.15);
+    	//WAKE UP AND SET GYROZ CLOCK
+    	select();
+    	response=spi.write(MPUREG_PWR_MGMT_1);
+    	response=spi.write(MPU_CLK_SEL_PLLGYROZ); 
+    	deselect();
+    	//DISABLE I2C
+    	select();
+    	response=spi.write(MPUREG_USER_CTRL);
+    	response=spi.write(BIT_I2C_IF_DIS);
+    	deselect();
+    	//WHO AM I?
+    	select();
+    	response=spi.write(MPUREG_WHOAMI|READ_FLAG);
+    	response=spi.write(0x00);
+    	deselect();
+    	if(response<100){return 0;}//COULDN'T RECEIVE WHOAMI
+    	//SET SAMPLE RATE
+    	select();
+    	response=spi.write(MPUREG_SMPLRT_DIV);
+    	response=spi.write(sample_rate_div); 
+    	deselect();
+    	// FS & DLPF
+    	select();
+    	response=spi.write(MPUREG_CONFIG);
+    	response=spi.write(low_pass_filter);
+    	deselect();
+    	//DISABLE INTERRUPTS
+    	select();
+    	response=spi.write(MPUREG_INT_ENABLE);
+    	response=spi.write(0x00);
+    	deselect();
+    	return 0;
+}
+
+</code></pre></p>
+3.讀取X、Y、Z軸加速度的值。(回傳資料單位:Gs)  
+<p><pre><code>
+float mpu6000_spi::read_acc(int axis)
+{
+    uint8_t responseH,responseL;
+    int16_t bit_data;
+    float data;
+    select();
+    switch (axis)
+{
+        case 0://X軸
+        responseH=spi.write(MPUREG_ACCEL_XOUT_H | READ_FLAG);
+        break;
+        case 1://Y軸
+        responseH=spi.write(MPUREG_ACCEL_YOUT_H | READ_FLAG);
+        break;
+        case 2://Z軸
+        responseH=spi.write(MPUREG_ACCEL_ZOUT_H | READ_FLAG);
+        break;
+    }
+    responseH=spi.write(0x00);
+    responseL=spi.write(0x00);
+    bit_data=((int16_t)responseH<<8)|responseL;
+    data=(float)bit_data;
+    data=data/acc_divider;
+    deselect();
+    return data;
+}
+</code></pre></p>
+4.讀取陀螺儀數據。(回傳資料待為:度/秒)  
+<p><pre><code>
+float mpu6000_spi::read_rot(int axis)
+{
+    uint8_t responseH,responseL;
+    int16_t bit_data;
+    float data;
+    select();
+    switch (axis){
+        case 0: //X軸
+        responseH=spi.write(MPUREG_GYRO_XOUT_H | READ_FLAG);
+        break;
+        case 1: //Y軸
+        responseH=spi.write(MPUREG_GYRO_YOUT_H | READ_FLAG);
+        break;
+        case 2: //Z軸
+        responseH=spi.write(MPUREG_GYRO_ZOUT_H | READ_FLAG);
+        break;
+    }
+    responseH=spi.write(0x00);
+    responseL=spi.write(0x00);
+    bit_data=((int16_t)responseH<<8)|responseL;
+    data=(float)bit_data;
+    data=data/gyro_divider;
+    deselect();
+    return data;
+}
+6.	select/deselect function撰寫如下：
+/*usage: enable and disable mpu6000 communication bus*/
+void mpu6000_spi::select() {
+    //Set CS low to start transmission (interrupts conversion)
+    cs = 0;
+}
+void mpu6000_spi::deselect() {
+    //Set CS high to stop transmission (restarts conversion)
+    cs = 1;
+}
+</code></pre></p>  
+		
+## III.	以I2C連接加速規模組
+使用的加速規模組型號：ADXL345(I2C)，圖(十一)[19] 。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic11.png)圖(十一) ADXL345(I2C)    
+[ADXL345 Pin腳][20]：  
+* VCC - Supply voltage range: 2.0 V to 3.6 V 電壓供給。  
+* GND - 接地。  
+* CS - Chip Select. 選擇晶片。  
+* INT1 - Interrupt 1 Output. 中斷輸出 1。  
+* INT2 - Interrupt 2 Output. 中斷輸出 2。  
+* SDO - Serial Data Output. 串列資料輸出 (SPI通訊)。  
+* SDA - Serial Data. 串列資料線。  
+* SCL - Serial Communications Clock. 串列通訊時脈線。
+
+[單晶片介面I2C介紹][21]：  
+串列通訊I²C (I square C)  
+I²C是內部整合電路的稱呼，是一種串列通訊匯流排，使用多主從架構，如圖(十二)[21]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic12.png)圖(十二) 串列通訊I²C結構    
+[22]I²C只使用兩條雙向開放集極(Open Drain)(串列資料(SDA)及串列時脈(SCL))並利用電阻將電位上拉。I²C允許相當大的工作電壓範圍，但典型的電壓準位  
+為+3.3V或+5v。傳輸速率：標準模式（100 Kbit/s）~ 快速模式（400 Kbit/s），如圖(十三)[23]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic13.png)圖(十三) I²C只使用兩條雙向開放集極 (串列資料及串列時脈)並利用電阻將電位上拉  
+[實作材料]：  
+開發板：ST官方的STM32VL Discovery  
+微控制器：STM32F100R8T6，圖(十四)[24](下面程式碼相容 F100、F103 、F105、F107 等所有 F1 系列)  
+
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic14.png)圖(十四) STM32F100R8T6三軸加速度器：ADXL345。  
+
+[接線] (考[25])：  
+VCC 接在 3V3 的位置；GND 接 GND；CS 和 VCC 接在一起，把 CS 的電位拉高和 VCC 相同，目的在告訴晶片是走 I2C 的協定；IN1 和 IN2 是負責驅動中斷的兩個輸出引腳，在這邊實作的過程不會用到，所以不用接；SDO 屬於 SPI 協定，因此在這個範例也用不到所以不用接；SDA 腳位設定 PB7，SCL 腳位設定 PB6。實際接線如圖(十五)[26]。  
+![image](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic15.jpg)圖(十五) ADXL345接線圖  
+[程式碼][26]：  
+<p><pre><code>
+#include "stm32f10x.h"
+#include <stdio.h>
+#define I2C_ADDRESS 0xA7 // ADXL345 I²C 地址
+void Init_I2C() { 
+    I2C_InitTypeDef I2C_InitStructure; 
+    GPIO_InitTypeDef GPIO_InitStructure;
+    I2C_Cmd(I2C1,ENABLE); //啟用 I2C
+
+    /*啟用I2C1 RCC時鐘*/
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C1, ENABLE);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
+
+    /* 設定 I2C1 的 SDA 與 SCL 腳位PB6 = SCL ，PB7 = SDA */
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7;
+    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_OD;
+    GPIO_Init(GPIOB, &GPIO_InitStructure);    
+ 
+    
+/* 設定 I2C1 */
+    I2C_InitStructure.I2C_Mode = I2C_Mode_SMBusHost;
+    I2C_InitStructure.I2C_DutyCycle = I2C_DutyCycle_2;
+    I2C_InitStructure.I2C_OwnAddress1 = 0x00; // STM32 自己的 I2C 地址
+    I2C_InitStructure.I2C_Ack = I2C_Ack_Enable;
+I2C_InitStructure.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit;
+    I2C_InitStructure.I2C_ClockSpeed = 100000 ; // 設定 I2C 時鐘速度為 100K 
+    I2C_Init(I2C1, &I2C_InitStructure);
+}
+
+/*  讀 ADXL345 佔存器中的 x , y, z 的值*/
+int xla, xha, yla, yha, zla, zha;
+float x, y, z;
+void readValue(){
+    I2C_start(I2C1, I2C_ADDRESS, I2C_Direction_Transmitter); 
+// 在 主發送 模式中 準備開始 發送
+    I2C_write(I2C1, 0x32 | (1 << 7)); // 指定佔存器
+    I2C_stop(I2C1); // 停止發送
+    I2C_start(I2C1, I2C_ADDRESS, I2C_Direction_Receiver); 
+// 在主發送模式中準備開始 發送
+    xla = I2C_read_ack(I2C1); 
+// 從ADXL345 讀取一個byte並請求後面一個 byte
+    xha = I2C_read_ack(I2C1); 
+// 從ADXL345讀取一個byte並請求後面一個 byte
+    yla = I2C_read_ack(I2C1);
+ 	// 從ADXL345讀取一個byte並請求後面一個 byte
+    yha = I2C_read_ack(I2C1);
+ 	// 從ADXL345讀取一個byte並請求後面一個 byte
+    zla = I2C_read_ack(I2C1); 
+// 從ADXL345讀取一個byte並請求後面一個 byte
+    zha = I2C_read_ack(I2C1);
+ 	// 從ADXL345讀取一個byte並請求後面一個 byte
+    I2C_read_nack(I2C1); 
+// 讀取一個 byet 後，就不再讀取後面一個 byte (停止傳輸)
+    /* 一定要強制轉成 short 型別，因為有些數字向左移動八位後
+     * 會超過 short 大小，進而變成負數。
+     * 例如：65535 + 1 = -65536
+     *       65535 + 2 = -65535
+     *       65535 + 3 = -65534
+     */
+    x = (((short)(xha << 8)) + xla) / 256.0F;
+    y = (((short)(yha << 8)) + yla) / 256.0F;
+    z = (((short)(zha << 8)) + zla) / 256.0F;
+}
+
+int main(){
+    Init_I2C(); // 初始化 I2C
+}
+</code></pre></p>  
+		
+# 資料來源
+一般題目：
+[1] Arduino筆記(71)：MPU-6050 (GY-521) 三軸陀螺儀+三軸加速計感測模組，  
+https://atceiling.blogspot.com/2019/09/arduino57mpu-6050-gy-521.html
+
+[2] US-100 超音波 (帶溫度補償)，  
+https://shop.playrobot.com/products/us-100-urtalsonic
+
+
+[3] STM32VLDISCOVERY - Evalu. board STM32 Value line Discovery，  
+https://www.distrelec.biz/en/evalu-board-stm32-value-line-discovery-st-stm32vldiscovery/p/17387239
+
+[4] OS - Ch2 中斷、I/O、系統呼叫、OS 結構設計 和 虛擬機，  
+https://mropengate.blogspot.com/2015/01/operating-system-ch2-os-structures.html
+
+[5] Systick Timer (SYSTICK)，  
+https://www.keil.com/pack/doc/CMSIS/Core/html/group__SysTick__gr.html
+
+[6] Program12-1 SysTick Interrupt，  
+https://lms.nchu.edu.tw/media/923418#24_d41d8cd98f00b204e9800998ecf8427e
+
+[7] Program12-2 Using PB4 external Interrupt，  
+https://lms.nchu.edu.tw/media/923418#40_a839ff9ab132fd515f6b71d6797fba80
+
+[8] Program12-3 Receiving data using the UART1 Interrupt，  
+https://lms.nchu.edu.tw/media/923418#43_4c3d03adaa97dc939984864caa45ce2b
+
+加分題：
+[9] L298N馬達驅動模組 可控制直流電機 步進馬達 適用樹莓派Arduino智能車機器人，   
+https://shopee.tw/L298N%E9%A6%AC%E9%81%94%E9%A9%85%E5%8B%95%E6%A8%A1%E7%B5%84%E5%8F%AF%E6%8E%A7%E5%88%B6%E7%9B%B4%E6%B5%81%E9%9B%BB%E6%A9%9F%E6%AD%A5%E9%80%B2%E9%A6%AC%E9%81%94%E9%81%A9%E7%94%A8%E6%A8%B9%E8%8E%93%E6%B4%BEArduino%E6%99%BA%E8%83%BD%E8%BB%8A%E6%A9%9F%E5%99%A8%E4%BA%BA-%E7%B4%85-i.4491023.2148260418
+
+[10] Raspberry Pi 筆記(14)：用鍵盤透過無線網路控制智能車，  
+https://atceiling.blogspot.com/2014/03/raspberry-pi.html
+
+[11] 陳昱仁 / 部落格 / Arduino / L298N馬達驅動IC & PWM8898，  
+https://bach.ccu.edu.tw/Site/nu14075/Blog/dir_Br2ysq/article_orvQpQ.html?group_login=-1
+
+[12] MPU-6000 - Motion Processing Unit，  
+https://www.sparkfun.com/products/retired/11234
+
+[13] MPU6000 Datasheet，  
+ https://www.datasheetq.com/MPU6000-doc-Unspecified
+
+[14] MPU-6050/60003三軸陀螺儀加速度傳感器6軸姿態 傾斜度GY-52，  
+https://www.ruten.com.tw/item/show?22025708186416
+
+[15] 《MPU-6000 / MPU-6050 产品说明书》，  
+ http://www.ruikang.net/upload/datasheet/MPU6050.pdf
+
+[16] 【Maker進階】認識UART、I2C、SPI三介面特性，  
+ https://makerpro.cc/2016/07/learning-interfaces-about-uart-i2c-spi/
+
+[17] Raspberry Pi 筆記(26)：MPU-6050 加速度計與陀螺儀感測器，  
+https://atceiling.blogspot.com/2017/02/raspberry-pi-mpu-6050.html
+
+[18] MPU6000.cpp，  
+https://os.mbed.com/users/brunoalfano/code/MPU6000_spi//file/2edbd561b520/MPU6000.cpp/
+
+[19] GY-291 ADXL-345 數位三軸重力加速度傾斜度模塊 GY291 ADXL345，  
+https://www.ruten.com.tw/item/show?21633321133008
+
+[20] [Day 23]-用JS控制Arduino吧！三軸一起來，速度與激情！- Johnny Five 之 Accelerometer 三軸加速度計，  
+ https://ithelp.ithome.com.tw/articles/10226147?sc=rss.iron
+
+[21] I²C維基百科，自由的百科全書，  
+https://zh.wikipedia.org/wiki/I%C2%B2C
+
+[22] I²C，  
+https://cloud921.pixnet.net/blog/post/298361879
+
+[23] SIOC 實驗9：I2C 楊郁莉/陳慶瀚 MIAT實驗室，  
+https://slideplayer.com/slide/5160539/
+
+[24] 5pcs/lot STM32F100R8T6 STM32F100R8T6B LQFP64，  
+ https://imall.com/product/5pcs-lot-STM32F100R8T6-STM32F100R8T6B-LQFP64/Home-Improvement-Computer-Office-Special-Category-Luggage-Bags-Men%27s-Clothing-Toys-Hobbies-Food-Lights-Lighting-Accessories/aliexpress.com/4000808323812/144-58525031/en
+
+[25] 三軸加速度計 on webduino，  
+http://arduinojackychi.blogspot.com/2016/02/on-webduino.html
+
+[26] STM32F1 入門教學：讀取 ADXL345 三軸加速度計【使用 IIC、I2C】，  
+ https://lolikitty.pixnet.net/blog/post/165575970
+
+
 
