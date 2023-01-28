@@ -6,3 +6,4 @@
 超音波模組的原理是車子發射一個電波然後利用電波反射回來的時間推算出車子與物體的距離，公式[1]:
 距離=(音波發射與接收時間差 * 聲音速度(340M/S))/2
 我們使用US100(GPIO or UART)來實作如圖(一)[1],
+![image]([picture or gif url](https://github.com/Chien-chia-yen/Intelligent-vehicle-simulation/blob/main/pic/pic1.PNG))
